@@ -13,12 +13,15 @@ VOCABULARY_DICT="../../data/short_text_classification/vocabulary_dict.pkl"
 THREAD_NUM=24
 
 function preprocess() {
-    python parallelizer.py -s $THREAD_NUM split_with_words.py $ALL_DATA $ALL_DATA_SEG
+    #python parallelizer.py -s $THREAD_NUM split_with_words.py $ALL_DATA $ALL_DATA_SEG
     python preprocess.py $ALL_DATA_SEG $ALL_DATA_TO_ID $VOCABULARY_DICT
 }
 
 function run_fasttext() {
-    python fasttext.py
+    echo "before training..."
+    python fasttext.py --is_training=True
+    echo "after training..."
+    python fasttext.py --is_training=False
 }
 
 #preprocess

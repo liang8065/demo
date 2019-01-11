@@ -5,6 +5,7 @@ import pickle
 import h5py
 import numpy as np
 import tensorflow as tf
+from sklearn.metrics import classification_report
 
 reload(sys)
 sys.setdefaultencoding('utf8')
@@ -14,6 +15,7 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string("all_data_h5py","../../data/short_text_classification/data_to_id.h5","all training data")
 tf.app.flags.DEFINE_string("id_index_pkl","../../data/short_text_classification/vocabulary_dict.pkl","word to id, and type to id")
 tf.app.flags.DEFINE_string("ckpt_dir","../../data/short_text_classification/fast_text_checkpoint/","checkpoint location for the model")
+tf.app.flags.DEFINE_string("summary_dir","../../data/short_text_classification/summary_dir/","summary log path")
 tf.app.flags.DEFINE_integer("label_size", 20, "number of label")
 tf.app.flags.DEFINE_float("learning_rate",0.01,"learning rate")
 tf.app.flags.DEFINE_integer("batch_size", 128, "Batch size for training/evaluating.")
@@ -52,8 +54,8 @@ class fastText:
 
         self.logits = self.inference()  # [batch_size, label_size]
 
-        if not is_training:
-            return
+        #if not is_training:
+        #    return
 
         self.loss_val = self.loss()
         self.train_op = self.train()
@@ -118,13 +120,13 @@ def load_data(cache_file_h5py, cache_file_pickle):
 
 
 def do_eval(sess,fast_text,evalX,evalY,batch_size):
-    number_examples=len(evalX)
-    eval_loss,eval_acc,eval_counter=0.0,0.0,0
-    for start,end in zip(range(0,number_examples,batch_size),range(batch_size,number_examples,batch_size)):
+    number_examples = len(evalX)
+    eval_loss,eval_acc,eval_counter = 0.0, 0.0, 0
+    for start,end in zip(range(0,number_examples,batch_size), range(batch_size,number_examples,batch_size)):
         curr_eval_loss, curr_eval_acc, = sess.run([fast_text.loss_val, fast_text.accuracy],
                                           feed_dict={fast_text.sentence: evalX[start:end],fast_text.labels: evalY[start:end]})
         eval_loss,eval_acc,eval_counter=eval_loss+curr_eval_loss,eval_acc+curr_eval_acc,eval_counter+1
-    return eval_loss/float(eval_counter),eval_acc/float(eval_counter)
+    return eval_loss/float(eval_counter), eval_acc/float(eval_counter)
 
 
 def main(_):
@@ -132,22 +134,21 @@ def main(_):
 
     vocab_size = len(word2index)
 
+    fast_text = fastText(FLAGS.label_size, FLAGS.learning_rate, FLAGS.batch_size, FLAGS.decay_steps, FLAGS.decay_rate,
+                            FLAGS.num_sampled, FLAGS.sentence_len, vocab_size, FLAGS.embed_size, FLAGS.is_training)
+
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     with tf.Session(config = config) as sess:
-        #Instantiate Model
-        fast_text = fastText(FLAGS.label_size, FLAGS.learning_rate, FLAGS.batch_size, FLAGS.decay_steps, FLAGS.decay_rate,
-                            FLAGS.num_sampled, FLAGS.sentence_len, vocab_size, FLAGS.embed_size, FLAGS.is_training)
-        #Initialize Save
         saver = tf.train.Saver()
         if os.path.exists(FLAGS.ckpt_dir+"checkpoint"):
             print("Restoring Variables from Checkpoint")
-            saver.restore(sess,tf.train.latest_checkpoint(FLAGS.ckpt_dir))
+            saver.restore(sess, tf.train.latest_checkpoint(FLAGS.ckpt_dir))
         else:
             print('Initializing Variables')
             sess.run(tf.global_variables_initializer())
-            #if FLAGS.use_embedding: #load pre-trained word embedding
-            #    assign_pretrained_word_embedding(sess, word2index, vocab_size, fast_text)
+
+        writer = tf.summary.FileWriter(FLAGS.summary_dir, tf.get_default_graph())
 
         curr_epoch = sess.run(fast_text.epoch_step)
         number_of_training_data = len(trainX)
@@ -179,16 +180,46 @@ def main(_):
         test_loss, test_acc = do_eval(sess, fast_text, testX, testY, batch_size)
         print("Test Loss:%.3f\tTest Accuracy:%.3f" %(test_loss, test_acc))
 
+        writer.close()
+
+
+def predict():
+    word2index, label2index, trainX, trainY, vaildX, validY, testX, testY = load_data(FLAGS.all_data_h5py, FLAGS.id_index_pkl)
+    vocab_size = len(word2index)
+
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    with tf.Session(config = config) as sess:
+        fast_text = fastText(FLAGS.label_size, FLAGS.learning_rate, FLAGS.batch_size, FLAGS.decay_steps, FLAGS.decay_rate,
+                            FLAGS.num_sampled, FLAGS.sentence_len, vocab_size, FLAGS.embed_size, FLAGS.is_training)
+
+        saver = tf.train.Saver()
+        if os.path.exists(FLAGS.ckpt_dir+"checkpoint"):
+            print("Restoring Variables from Checkpoint")
+            saver.restore(sess,tf.train.latest_checkpoint(FLAGS.ckpt_dir))
+        else:
+            print('Initializing Model Failed')
+            return
+
+        print("test_X.shape:", testX.shape)
+        print("test_Y.shape:", testY.shape)
+
+        raw_labels = []
+        predicted_labels = []
+        number_examples = len(testX)
+        batch_size = FLAGS.batch_size
+        for start, end in zip(range(0, number_examples, batch_size), range(batch_size, number_examples, batch_size)):
+            predictions = sess.run(fast_text.predictions, feed_dict={fast_text.sentence: testX[start:end], fast_text.labels: testY[start:end]})
+            if len(predictions) == len(testY[start:end]):
+                raw_labels.extend(testY[start:end])
+                predicted_labels.extend(predictions)
+
+        print classification_report(raw_labels, predicted_labels)
+
 
 if __name__ == "__main__":
-    tf.app.run()
+    if FLAGS.is_training:
+        tf.app.run()
+    else:
+        predict()
 
-    """
-    with open(FLAGS.id_index_pkl, 'rb') as f_pickle:
-        word2index, label2index = pickle.load(f_pickle)
-
-    for i in label2index:
-        print "%d\t%s" % (label2index[i], i)
-    for i in word2index:
-        print "%d\t%s" % (word2index[i], i)
-    """
