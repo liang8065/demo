@@ -141,7 +141,7 @@ def main(_):
     config.gpu_options.allow_growth = True
     with tf.Session(config = config) as sess:
         saver = tf.train.Saver()
-        if os.path.exists(FLAGS.ckpt_dir+"checkpoint"):
+        if os.path.exists(FLAGS.ckpt_dir + "checkpoint"):
             print("Restoring Variables from Checkpoint")
             saver.restore(sess, tf.train.latest_checkpoint(FLAGS.ckpt_dir))
         else:
